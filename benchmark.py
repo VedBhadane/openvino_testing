@@ -155,80 +155,82 @@ def _out(msg=""):
 # (intel-rapl:0, intel-rapl:1, ...) and IGNORE the sub-zones (intel-rapl:0:0 = "core",
 # intel-rapl:0:1 = "uncore") so we don't double-count.
 
-def _rapl_package_files():
-    """Return [(energy_uj_path, max_energy_range_uj), ...] for each top-level package, or []."""
-    packages = []
-    # Match only top-level packages like 'intel-rapl:0', never sub-zones 'intel-rapl:0:1'.
-    candidates = sorted(glob.glob("/sys/class/powercap/intel-rapl:*/energy_uj"))
-    _dbg(f"RAPL: scanning powercap, found {len(candidates)} energy_uj file(s)")
-    for energy_path in candidates:
-        parent = os.path.dirname(energy_path)
-        if not re.match(r"^intel-rapl:\d+$", os.path.basename(parent)):
-            _dbg(f"RAPL:   skip sub-zone {energy_path}")
-            continue
-        try:
-            with open(energy_path) as f:
-                f.read()  # probe readability up front; raises if we lack permission
-            max_path = os.path.join(parent, "max_energy_range_uj")
-            max_range = int(open(max_path).read().strip()) if os.path.exists(max_path) else None
-            packages.append((energy_path, max_range))
-            _dbg(f"RAPL:   usable package {energy_path} (max_range={max_range})")
-        except (OSError, ValueError) as e:
-            # Unreadable (permissions) or malformed — skip; we'll fall back gracefully.
-            _dbg(f"RAPL:   UNREADABLE {energy_path} ({e.__class__.__name__}) -> need root?")
-            continue
-    _dbg(f"RAPL: {len(packages)} usable package(s) -> power KPI {'ON' if packages else 'OFF (fallback)'}")
-    return packages
+# def _rapl_package_files():
+#     """Return [(energy_uj_path, max_energy_range_uj), ...] for each top-level package, or []."""
+#     packages = []
+#     # Match only top-level packages like 'intel-rapl:0', never sub-zones 'intel-rapl:0:1'.
+#     candidates = sorted(glob.glob("/sys/class/powercap/intel-rapl:*/energy_uj"))
+#     _dbg(f"RAPL: scanning powercap, found {len(candidates)} energy_uj file(s)")
+#     for energy_path in candidates:
+#         parent = os.path.dirname(energy_path)
+#         if not re.match(r"^intel-rapl:\d+$", os.path.basename(parent)):
+#             _dbg(f"RAPL:   skip sub-zone {energy_path}")
+#             continue
+#         try:
+#             with open(energy_path) as f:
+#                 f.read()  # probe readability up front; raises if we lack permission
+#             max_path = os.path.join(parent, "max_energy_range_uj")
+#             max_range = int(open(max_path).read().strip()) if os.path.exists(max_path) else None
+#             packages.append((energy_path, max_range))
+#             _dbg(f"RAPL:   usable package {energy_path} (max_range={max_range})")
+#         except (OSError, ValueError) as e:
+#             # Unreadable (permissions) or malformed — skip; we'll fall back gracefully.
+#             _dbg(f"RAPL:   UNREADABLE {energy_path} ({e.__class__.__name__}) -> need root?")
+#             continue
+#     _dbg(f"RAPL: {len(packages)} usable package(s) -> power KPI {'ON' if packages else 'OFF (fallback)'}")
+#     return packages
 
 
-def _read_energy_uj(packages):
-    """Sum the current energy counters (microjoules) across the given packages."""
-    total = 0
-    for energy_path, _ in packages:
-        total += int(open(energy_path).read().strip())
-    return total
+# def _read_energy_uj(packages):
+#     """Sum the current energy counters (microjoules) across the given packages."""
+#     total = 0
+#     for energy_path, _ in packages:
+#         total += int(open(energy_path).read().strip())
+#     return total
 
 
-class _PowerMeter:
-    """Context manager: measures average CPU-package power (watts) over the wrapped block.
+# class _PowerMeter:
+#     """Context manager: measures average CPU-package power (watts) over the wrapped block.
 
-    Usage:
-        meter = _PowerMeter()
-        with meter:
-            ...do work...
-        meter.avg_watts   # None if RAPL was unavailable
-    """
+#     Usage:
+#         meter = _PowerMeter()
+#         with meter:
+#             ...do work...
+#         meter.avg_watts   # None if RAPL was unavailable
+#     """
 
-    def __init__(self):
-        self._packages = _rapl_package_files()
-        self.available = len(self._packages) > 0
-        self.avg_watts = None
-        self.energy_joules = None
-        self._e0 = None
-        self._t0 = None
+#     def __init__(self):
+#         self._packages = _rapl_package_files()
+#         self.available = len(self._packages) > 0
+#         self.avg_watts = None
+#         self.energy_joules = None
+#         self._e0 = None
+#         self._t0 = None
 
-    def __enter__(self):
-        if self.available:
-            self._e0 = _read_energy_uj(self._packages)
-            self._t0 = time.perf_counter()
-        return self
+#     def __enter__(self):
+#         if self.available:
+#             self._e0 = _read_energy_uj(self._packages)
+#             self._t0 = time.perf_counter()
+#         return self
 
-    def __exit__(self, *exc):
-        if not self.available:
-            return False
-        dt = time.perf_counter() - self._t0
-        e1 = _read_energy_uj(self._packages)
-        delta_uj = e1 - self._e0
-        if delta_uj < 0:
-            # Counter wrapped around — add each package's range once (best effort).
-            _dbg(f"RAPL: counter wrap detected (delta={delta_uj} uj), correcting")
-            for _, max_range in self._packages:
-                if max_range:
-                    delta_uj += max_range
-        self.energy_joules = delta_uj / 1e6
-        self.avg_watts = (self.energy_joules / dt) if dt > 0 else None
-        _dbg(f"RAPL: measured {self.energy_joules:.2f} J over {dt:.2f}s -> {self.avg_watts:.2f} W")
-        return False
+#     def __exit__(self, *exc):
+#         if not self.available:
+#             return False
+#         if self._t0 is None or self._e0 is None:
+#             return False
+#         dt = time.perf_counter() - self._t0
+#         e1 = _read_energy_uj(self._packages)
+#         delta_uj = e1 - self._e0
+#         if delta_uj < 0:
+#             # Counter wrapped around — add each package's range once (best effort).
+#             _dbg(f"RAPL: counter wrap detected (delta={delta_uj} uj), correcting")
+#             for _, max_range in self._packages:
+#                 if max_range:
+#                     delta_uj += max_range
+#         self.energy_joules = delta_uj / 1e6
+#         self.avg_watts = (self.energy_joules / dt) if dt > 0 else None
+#         _dbg(f"RAPL: measured {self.energy_joules:.2f} J over {dt:.2f}s -> {self.avg_watts:.2f} W")
+#         return False
 
 
 # ----------------------------------------------------------------------------------------
@@ -267,8 +269,8 @@ def print_system_info():
     _out(f"  SW workload         : hardware_benchmark_flow.py (PyTorch CNN train + inference)")
     _out(f"  Inference engine    : PyTorch {torch.__version__} (CPU / oneDNN)")
     _out(f"  OS / platform       : {platform.platform()}")
-    rapl = _rapl_package_files()
-    _out(f"  RAPL power readable : {'yes (' + str(len(rapl)) + ' package(s))' if rapl else 'NO -> power KPI unavailable, run as root'}")
+    # rapl = _rapl_package_files()
+    # _out(f"  RAPL power readable : {'yes (' + str(len(rapl)) + ' package(s))' if rapl else 'NO -> power KPI unavailable, run as root'}")
     _out("=" * 78)
 
 
@@ -379,16 +381,17 @@ def _single_run(run_idx, sizes, seed):
     n_ibatches = sizes["infer_samples"] // ibs
 
     model.eval()
-    meter = _PowerMeter()
-    _dbg(f"run[{run_idx}]: THROUGHPUT phase start — {n_ibatches} batches of {ibs} "
-         f"(power metering {'ON' if meter.available else 'OFF'}) ...")
+    # meter = _PowerMeter()
+    _dbg(f"run[{run_idx}]: THROUGHPUT phase start — {n_ibatches} batches of {ibs} ")
+        #  f"(power metering {'ON' if meter.available else 'OFF'}) ...")
     t0 = time.perf_counter()
-    with torch.no_grad(), meter:
+    # with torch.no_grad(), meter:
+    with torch.no_grad():
         for b in range(n_ibatches):
             _ = model(x_inf[b * ibs:(b + 1) * ibs])
     infer_secs = time.perf_counter() - t0
     infer_throughput = (n_ibatches * ibs) / infer_secs            # KPI 1: samples / sec
-    avg_power_w = meter.avg_watts                                 # KPI 3: watts (or None)
+    # avg_power_w = meter.avg_watts                                 # KPI 3: watts (or None)
     _dbg(f"run[{run_idx}]: THROUGHPUT done in {infer_secs:.2f}s -> {infer_throughput:.1f} samples/s")
 
     # ---- (c) INFERENCE LATENCY  (KPI 2) -------------------------------------------------
@@ -419,24 +422,26 @@ def _single_run(run_idx, sizes, seed):
         "latency_mean_ms": latency_mean,            # KPI 2 (headline = mean)
         "latency_p50_ms": latency_p50,
         "latency_p95_ms": latency_p95,
-        "power_w": avg_power_w,                      # KPI 3 (None if RAPL unavailable)
-        "energy_j": meter.energy_joules,
+        # "power_w": avg_power_w,                      # KPI 3 (None if RAPL unavailable)
+        # "energy_j": meter.energy_joules,
     }
 
 
 # ----------------------------------------------------------------------------------------
 # 4. COMPOSITE SCORE + DELTA
 # ----------------------------------------------------------------------------------------
-def _composite_score(throughput_sps, latency_ms, power_w):
+def _composite_score(throughput_sps, latency_ms):
     """Fold the 3 KPIs into ONE 'higher-is-better' score (see module docstring).
 
         S = ( Throughput / (Latency_ms * Power_W) ) ** (1/3)
 
     If power is unavailable we fall back to a 2-KPI score S = sqrt(Throughput / Latency_ms)
     so the run is still comparable across machines measured the SAME way.
+
+    EDIT: NOT USING POWER
     """
-    if power_w and power_w > 0:
-        return (throughput_sps / (latency_ms * power_w)) ** (1.0 / 3.0), 3
+    # if power_w and power_w > 0:
+    #     return (throughput_sps / (latency_ms * power_w)) ** (1.0 / 3.0), 3
     return math.sqrt(throughput_sps / latency_ms), 2
 
 
@@ -495,7 +500,9 @@ def func(
          f"infer_samples={infer_samples} epochs={epochs} seed={seed}")
     print_system_info()
     _out(f"\nRunning {num_runs} iteration(s). KPIs: throughput (up=good), "
-         f"latency ms (down=good), power W (down=good).\n")
+         f"latency ms (down=good)"
+        #  f", power W (down=good).\n"
+         )
 
     runs = []
     for i in range(num_runs):
@@ -510,14 +517,14 @@ def func(
         _dbg(f"========== RUN {i + 1}/{num_runs} finished in "
              f"{time.perf_counter() - run_t0:.2f}s ==========")
 
-        power_str = f"{m['power_w']:.2f} W" if m["power_w"] is not None else "n/a (no RAPL)"
+        # power_str = f"{m['power_w']:.2f} W" if m["power_w"] is not None else "n/a (no RAPL)"
         _out(f"--- Run {i + 1}/{num_runs} ------------------------------------------------")
         _out(f"    Train throughput   : {m['train_throughput_sps']:>10.1f} samples/s")
         _out(f"    KPI1 Throughput    : {m['infer_throughput_sps']:>10.1f} samples/s  (inference)")
         _out(f"    KPI2 Latency       : {m['latency_mean_ms']:>10.3f} ms  (mean | "
              f"p50 {m['latency_p50_ms']:.3f} | p95 {m['latency_p95_ms']:.3f})")
-        _out(f"    KPI3 Power         : {power_str:>14}"
-             + (f"   ({m['energy_j']:.1f} J over inference phase)" if m['energy_j'] else ""))
+        # _out(f"    KPI3 Power         : {power_str:>14}"
+            #  + (f"   ({m['energy_j']:.1f} J over inference phase)" if m['energy_j'] else ""))
         _out()
 
     # ---- AVERAGE THE KPIs ACROSS RUNS ---------------------------------------------------
@@ -527,12 +534,13 @@ def func(
 
     avg_throughput = avg("infer_throughput_sps")
     avg_latency = avg("latency_mean_ms")
-    avg_power = avg("power_w")
+    # avg_power = avg("power_w")
     avg_train_tp = avg("train_throughput_sps")
 
     _dbg(f"averaging {num_runs} run(s): throughput={avg_throughput:.1f} "
-         f"latency={avg_latency:.3f} power={avg_power if avg_power is None else round(avg_power, 2)}")
-    score, n_kpis = _composite_score(avg_throughput, avg_latency, avg_power)
+         f"latency={avg_latency:.3f}")
+    # "power={avg_power if avg_power is None else round(avg_power, 2)}")
+    score, n_kpis = _composite_score(avg_throughput, avg_latency)
     _dbg(f"composite score S={score:.4f} using {n_kpis} KPI(s)")
 
     _out("=" * 78)
@@ -541,7 +549,7 @@ def func(
     _out(f"  Train throughput      : {avg_train_tp:>10.1f} samples/s")
     _out(f"  KPI1 Throughput       : {avg_throughput:>10.1f} samples/s")
     _out(f"  KPI2 Latency (mean)   : {avg_latency:>10.3f} ms")
-    _out(f"  KPI3 Power            : {(f'{avg_power:.2f} W') if avg_power is not None else 'n/a (RAPL unreadable; run as root)':>10}")
+    # _out(f"  KPI3 Power            : {(f'{avg_power:.2f} W') if avg_power is not None else 'n/a (RAPL unreadable; run as root)':>10}")
     _out(f"  COMPOSITE SCORE S     : {score:>10.4f}   "
          f"({n_kpis}-KPI {'throughput/(latency*power)' if n_kpis == 3 else 'throughput/latency (NO power)'} geomean)")
     _out("=" * 78)
@@ -552,7 +560,7 @@ def func(
             "train_throughput_sps": avg_train_tp,
             "infer_throughput_sps": avg_throughput,
             "latency_mean_ms": avg_latency,
-            "power_w": avg_power,
+            # "power_w": avg_power,
         },
         "composite_score": score,
         "composite_kpis": n_kpis,
