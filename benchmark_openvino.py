@@ -539,7 +539,7 @@ def func(
     for i in range(num_runs):
         _dbg(f"========== RUN {i + 1}/{num_runs} starting ==========")
         run_t0 = time.perf_counter()
-        m = _single_run(i, dict(
+        m = _single_run(i+1, dict(
             train_samples=train_samples, infer_samples=infer_samples, epochs=epochs,
             train_batch=train_batch, infer_batch=infer_batch, latency_iters=latency_iters,
             latency_warmup=latency_warmup, num_classes=num_classes,
