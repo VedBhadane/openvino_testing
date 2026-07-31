@@ -638,7 +638,7 @@ def func(
 _baseline_env = os.environ.get("MLFLOW_BENCHMARK_BASELINE")
 benchmark_result = func(
     # baseline_score=float(_baseline_env) if _baseline_env else None,
-    baseline_score = 20.8318
+    baseline_score = 21.7505
 )
 
 # Compact machine-readable summary line (handy for grepping the logs / diffing two machines).

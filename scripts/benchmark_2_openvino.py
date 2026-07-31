@@ -10,7 +10,8 @@ Intel has given us a pre-production "Wildcat Lake" (Core 300 / Core Series 3) ma
 and, as part of our partnership, wants us to compare it against our existing data-center
 server (the "baseline"). They sent the comparison table below. The table is generic; this
 script is our concrete answer to it. We run THIS SAME script on both machines and compare
-the numbers it prints.
+the numbers it prints. This specific file intends to compare the performance of Intel's 
+OpenVINO Runtime (CPU plugin) on the two machines, using a small CNN workload.
 
 What the Intel table actually means (their image, decoded)
 ----------------------------------------------------------
@@ -38,8 +39,6 @@ The table has one row per "thing to report" and columns: Baseline system | NEW s
                               model. Higher = better.
     KPI 2  Latency            How LONG a single request takes. Here: time for one
                               single-sample OpenVINO inference, in milliseconds. Lower = better.
-    KPI 3  Power consumption  Average CPU-package power drawn while doing the inference work,
-                              in watts, read from Intel RAPL. Lower = better.
     Delta %                   The single headline number Intel asked for: how much better
                               (or worse) the NEW machine is than the baseline, combining all
                               three KPIs. See "The single Delta %" below.
@@ -425,7 +424,7 @@ def _single_run(run_idx, sizes, seed, core):
     compiled_model = _to_openvino(model, sizes["num_classes"], core, run_idx)
     output_port = compiled_model.output(0)
 
-    # ---- (c) INFERENCE THROUGHPUT  (KPI 1) + POWER (KPI 3) --------------------------------
+    # ---- (c) INFERENCE THROUGHPUT  (KPI 1) --------------------------------
     x_inf, _ = _make_synthetic_data(sizes["infer_samples"], sizes["num_classes"], seed + 999 + run_idx)
     x_inf_np = x_inf.numpy()
     ibs = sizes["infer_batch"]
@@ -484,10 +483,7 @@ def _single_run(run_idx, sizes, seed, core):
 def _composite_score(throughput_sps, latency_ms):
     """Fold the 3 KPIs into ONE 'higher-is-better' score (see module docstring).
 
-        S = ( Throughput / (Latency_ms * Power_W) ) ** (1/3)
-
-    If power is unavailable we fall back to a 2-KPI score S = sqrt(Throughput / Latency_ms)
-    so the run is still comparable across machines measured the SAME way.
+        S = ( Throughput / Latency_ms ) ** (1/3)
 
     EDIT: NOT USING POWER
     """
@@ -662,6 +658,7 @@ def func(
 _baseline_env = os.environ.get("MLFLOW_BENCHMARK_BASELINE")
 benchmark_result = func(
     baseline_score=float(_baseline_env) if _baseline_env else None,
+    # baseline_score = 21.7505
 )
 
 # Compact machine-readable summary line (handy for grepping the logs / diffing two machines).
