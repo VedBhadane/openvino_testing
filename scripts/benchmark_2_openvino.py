@@ -275,6 +275,45 @@ def _openvino_cpu_device_info(core):
         return "unknown"
 
 
+def _env_threading_snapshot():
+    """Return the container/threading env vars most likely to affect CPU inference."""
+    keys = (
+        "OMP_NUM_THREADS",
+        "OMP_PROC_BIND",
+        "OMP_PLACES",
+        "KMP_AFFINITY",
+        "KMP_BLOCKTIME",
+        "KMP_SETTINGS",
+        "OPENVINO_LOG_LEVEL",
+    )
+    return {key: os.environ.get(key, "<unset>") for key in keys}
+
+
+def _openvino_cpu_runtime_info(core):
+    """Return the CPU-plugin properties that are most useful when diagnosing stalls."""
+    keys = (
+        "SUPPORTED_PROPERTIES",
+        "OPTIMIZATION_CAPABILITIES",
+        "PERFORMANCE_HINT",
+        "PERFORMANCE_HINT_NUM_REQUESTS",
+        "INFERENCE_NUM_THREADS",
+        "NUM_STREAMS",
+        "ENABLE_CPU_PINNING",
+        "ENABLE_HYPER_THREADING",
+        "DEVICE_TYPE",
+        "EXECUTION_DEVICES",
+        "RANGE_FOR_STREAMS",
+        "RANGE_FOR_ASYNC_INFER_REQUESTS",
+    )
+    info = {}
+    for key in keys:
+        try:
+            info[key] = core.get_property("CPU", key)
+        except Exception as exc:
+            info[key] = f"<unavailable: {exc.__class__.__name__}>"
+    return info
+
+
 def print_system_info(core):
     """Print the hardware/software banner that feeds the top rows of Intel's table."""
     _out("=" * 78)
@@ -290,6 +329,8 @@ def print_system_info(core):
     _out(f"  SW workload         : hardware_benchmark_flow.py (PyTorch CNN train, OpenVINO inference)")
     _out(f"  Training engine     : PyTorch {torch.__version__} (CPU)")
     _out(f"  Inference engine    : OpenVINO Runtime {ov.__version__} (CPU plugin)")
+    _out(f"  OpenVINO env vars    : {_env_threading_snapshot()}")
+    _out(f"  OpenVINO CPU props  : {_openvino_cpu_runtime_info(core)}")
     _out(f"  OS / platform       : {platform.platform()}")
     # rapl = _rapl_package_files()
     # _out(f"  RAPL power readable : {'yes (' + str(len(rapl)) + ' package(s))' if rapl else 'NO -> power KPI unavailable, run as root'}")
@@ -432,11 +473,18 @@ def _single_run(run_idx, sizes, seed, core):
 
     # meter = _PowerMeter()
     _dbg(f"run[{run_idx}]: THROUGHPUT phase start (OpenVINO) — {n_ibatches} batches of {ibs} ")
-        #  f"(power metering {'ON' if meter.available else 'OFF'}) ...")
+         #  f"(power metering {'ON' if meter.available else 'OFF'}) ...")
+    infer_request = compiled_model.create_infer_request()
+    throughput_warmup = x_inf_np[:ibs]
+    _dbg(f"run[{run_idx}]: THROUGHPUT warmup (1 batch) ...")
+    infer_request.infer(throughput_warmup)
     t0 = time.perf_counter()
     # with meter:
+    hb = max(1, n_ibatches // 8)
     for b in range(n_ibatches):
-        _ = compiled_model(x_inf_np[b * ibs:(b + 1) * ibs])[output_port]
+        infer_request.infer(x_inf_np[b * ibs:(b + 1) * ibs])
+        if b % hb == 0:
+            _dbg(f"run[{run_idx}]:   throughput batch {b + 1}/{n_ibatches} complete")
     infer_secs = time.perf_counter() - t0
     infer_throughput = (n_ibatches * ibs) / infer_secs            # KPI 1: samples / sec
     # avg_power_w = meter.avg_watts                                 # KPI 3: watts (or None)
